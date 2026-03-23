@@ -69,6 +69,7 @@
             border: 2px solid #00ff00;
             border-radius: 10px;
             padding: 15px;
+            position: relative;
         }
 
         .graph-title {
@@ -85,6 +86,44 @@
             background: radial-gradient(circle at center, #0a0a1a 0%, #000000 100%);
             border-radius: 5px;
             display: block;
+            cursor: crosshair;
+        }
+
+        .data-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.95);
+            border: 2px solid #00ff00;
+            border-radius: 5px;
+            padding: 10px;
+            color: #00ff00;
+            font-size: 0.75em;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+            min-width: 200px;
+        }
+
+        .tooltip-title {
+            font-weight: bold;
+            color: #ffff00;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #00ff00;
+            padding-bottom: 3px;
+        }
+
+        .tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+        }
+
+        .tooltip-label {
+            color: #888;
+        }
+
+        .tooltip-value {
+            color: #00ff00;
+            font-weight: bold;
         }
 
         .destination-select {
@@ -298,16 +337,19 @@
                 <div class="graph-panel">
                     <div class="graph-title">📈 VERTICAL ASCENT & ORBITAL INSERTION</div>
                     <canvas id="ascentGraph"></canvas>
+                    <div class="data-tooltip" id="ascentTooltip"></div>
                 </div>
 
                 <div class="graph-panel">
                     <div class="graph-title">🚀 TRANSFER BURN (Earth to <span id="destName">Venus</span>)</div>
                     <canvas id="transferGraph"></canvas>
+                    <div class="data-tooltip" id="transferTooltip"></div>
                 </div>
 
                 <div class="graph-panel">
                     <div class="graph-title">🔥 RE-ENTRY (<span id="destName2">Venus</span> Atmosphere)</div>
                     <canvas id="reentryGraph"></canvas>
+                    <div class="data-tooltip" id="reentryTooltip"></div>
                 </div>
             </div>
         </div>
@@ -321,6 +363,11 @@
         let ascentData = [];
         let transferData = [];
         let reentryData = [];
+        
+        // Selected points for each graph
+        let selectedAscentPoint = null;
+        let selectedTransferPoint = null;
+        let selectedReentryPoint = null;
         
         let currentPhase = "";
 
@@ -340,6 +387,106 @@
         }
         resizeCanvases();
         window.addEventListener('resize', resizeCanvases);
+
+        // Add click event listeners to canvases
+        canvasAscent.addEventListener('click', (e) => handleGraphClick(e, canvasAscent, ascentData, 'ascent'));
+        canvasTransfer.addEventListener('click', (e) => handleGraphClick(e, canvasTransfer, transferData, 'transfer'));
+        canvasReentry.addEventListener('click', (e) => handleGraphClick(e, canvasReentry, reentryData, 'reentry'));
+
+        function handleGraphClick(event, canvas, data, graphType) {
+            if (data.length < 2) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+
+            // Convert click coordinates to data space
+            const padding = 50;
+            const width = canvas.width - 2 * padding;
+            const height = canvas.height - 2 * padding;
+
+            const altitudes = data.map(d => d.alt);
+            const horizontals = data.map(d => d.velH);
+            const maxAlt = Math.max(...altitudes);
+            const minAlt = Math.min(...altitudes, 0);
+            const maxH = Math.max(...horizontals);
+            const minH = Math.min(...horizontals);
+
+            // Find closest point
+            let closestPoint = null;
+            let minDistance = Infinity;
+
+            for (let i = 0; i < data.length; i++) {
+                const point = data[i];
+                const x = padding + ((point.velH - minH) / (maxH - minH)) * width;
+                const y = padding + height - ((point.alt - minAlt) / (maxAlt - minAlt)) * height;
+
+                const distance = Math.sqrt((x - clickX) ** 2 + (y - clickY) ** 2);
+                if (distance < minDistance && distance < 30) { // 30px click tolerance
+                    minDistance = distance;
+                    closestPoint = point;
+                }
+            }
+
+            if (closestPoint) {
+                if (graphType === 'ascent') selectedAscentPoint = closestPoint;
+                else if (graphType === 'transfer') selectedTransferPoint = closestPoint;
+                else if (graphType === 'reentry') selectedReentryPoint = closestPoint;
+
+                showTooltip(closestPoint, graphType, event.clientX, event.clientY);
+            }
+        }
+
+        function showTooltip(point, graphType, mouseX, mouseY) {
+            const tooltipId = graphType === 'ascent' ? 'ascentTooltip' : 
+                             graphType === 'transfer' ? 'transferTooltip' : 'reentryTooltip';
+            const tooltip = document.getElementById(tooltipId);
+
+            const phase = point.phase || 'UNKNOWN';
+            const temp = point.temp !== undefined ? point.temp.toFixed(1) + '°C' : 'N/A';
+            const drag = point.drag !== undefined ? (point.drag / 1000).toFixed(1) + ' kN' : 'N/A';
+            const grav = point.grav !== undefined ? (point.grav / 1000).toFixed(1) + ' kN' : 'N/A';
+
+            tooltip.innerHTML = `
+                <div class="tooltip-title">📊 DATA POINT - ${phase}</div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Time:</span>
+                    <span class="tooltip-value">${point.time.toFixed(1)} s</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Altitude:</span>
+                    <span class="tooltip-value">${(point.alt / 1000).toFixed(2)} km</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Velocity:</span>
+                    <span class="tooltip-value">${Math.sqrt(point.velH**2 + point.velV**2).toFixed(1)} m/s</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">V-Horizontal:</span>
+                    <span class="tooltip-value">${point.velH.toFixed(1)} m/s</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">V-Vertical:</span>
+                    <span class="tooltip-value">${point.velV.toFixed(1)} m/s</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Drag Force:</span>
+                    <span class="tooltip-value">${drag}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Grav Force:</span>
+                    <span class="tooltip-value">${grav}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Temperature:</span>
+                    <span class="tooltip-value">${temp}</span>
+                </div>
+            `;
+
+            tooltip.style.display = 'block';
+            tooltip.style.left = '10px';
+            tooltip.style.top = '40px';
+        }
 
         const PLANETS = {
             "Venus": {
@@ -368,7 +515,7 @@
         const EARTH_RHO0 = 1.225;
         const HEAT_SHIELD_LIMIT = 6180.0;
 
-        function drawGraph(ctx, data, title, xLabel, yLabel, showVelocity = false, planetRadius = 6371000, phase = '') {
+        function drawGraph(ctx, data, title, xLabel, yLabel, showVelocity = false, planetRadius = 6371000, phase = '', selectedPoint = null) {
             ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
             
             if (data.length < 2) return;
@@ -486,8 +633,30 @@
             }
             ctx.stroke();
             
-            // Draw current position
-            if (data.length > 0) {
+            // Draw selected point (if any)
+            if (selectedPoint) {
+                const x = padding + ((selectedPoint.velH - minH) / (maxH - minH)) * width;
+                const y = padding + height - ((selectedPoint.alt - minAlt) / (maxAlt - minAlt)) * height;
+                
+                // Outer glow
+                ctx.beginPath();
+                ctx.arc(x, y, 12, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                
+                // Inner circle
+                ctx.beginPath();
+                ctx.arc(x, y, 6, 0, Math.PI * 2);
+                ctx.fillStyle = '#FF00FF';
+                ctx.fill();
+                ctx.strokeStyle = '#FFFF00';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            
+            // Draw current position (during simulation)
+            if (data.length > 0 && !selectedPoint) {
                 const last = data[data.length - 1];
                 const x = padding + ((last.velH - minH) / (maxH - minH)) * width;
                 const y = padding + height - ((last.alt - minAlt) / (maxAlt - minAlt)) * height;
@@ -521,11 +690,11 @@
         }
 
         function updateGraphs() {
-            drawGraph(ctxAscent, ascentData, 'Ascent', 'Horizontal Vel', 'Altitude', false, 6371000, 'ascent');
-            drawGraph(ctxTransfer, transferData, 'Transfer', 'Horizontal Vel', 'Altitude', false, 6371000, 'transfer');
+            drawGraph(ctxAscent, ascentData, 'Ascent', 'Horizontal Vel', 'Altitude', false, 6371000, 'ascent', selectedAscentPoint);
+            drawGraph(ctxTransfer, transferData, 'Transfer', 'Horizontal Vel', 'Altitude', false, 6371000, 'transfer', selectedTransferPoint);
             
             const destRadius = PLANETS[selectedDestination].radius;
-            drawGraph(ctxReentry, reentryData, 'Re-entry', 'Horizontal Vel', 'Altitude', false, destRadius, 'reentry');
+            drawGraph(ctxReentry, reentryData, 'Re-entry', 'Horizontal Vel', 'Altitude', false, destRadius, 'reentry', selectedReentryPoint);
             
             requestAnimationFrame(updateGraphs);
         }
@@ -540,6 +709,12 @@
             ascentData = [];
             transferData = [];
             reentryData = [];
+            selectedAscentPoint = null;
+            selectedTransferPoint = null;
+            selectedReentryPoint = null;
+            document.getElementById('ascentTooltip').style.display = 'none';
+            document.getElementById('transferTooltip').style.display = 'none';
+            document.getElementById('reentryTooltip').style.display = 'none';
         }
 
         function generateStageInputs() {
@@ -605,6 +780,12 @@
             ascentData = [];
             transferData = [];
             reentryData = [];
+            selectedAscentPoint = null;
+            selectedTransferPoint = null;
+            selectedReentryPoint = null;
+            document.getElementById('ascentTooltip').style.display = 'none';
+            document.getElementById('transferTooltip').style.display = 'none';
+            document.getElementById('reentryTooltip').style.display = 'none';
         }
 
         function stopSimulation() {
@@ -749,7 +930,16 @@
 
                     // Update graph data based on phase
                     if (logCounter % 50 === 0) {
-                        const dataPoint = { alt: alt, velH: vel_h, velV: vel_v, time: time };
+                        const dataPoint = { 
+                            alt: alt, 
+                            velH: vel_h, 
+                            velV: vel_v, 
+                            time: time,
+                            drag: f_drag_mag,
+                            grav: current_total_mass * g_accel,
+                            temp: shield_temp,
+                            phase: mission_phase
+                        };
                         
                         if (mission_phase === "VERTICAL_ASCENT" || mission_phase === "ORBITAL_INSERTION") {
                             ascentData.push(dataPoint);
