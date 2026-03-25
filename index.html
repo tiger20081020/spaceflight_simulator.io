@@ -446,6 +446,7 @@
             const temp = point.temp !== undefined ? point.temp.toFixed(1) + '°C' : 'N/A';
             const drag = point.drag !== undefined ? (point.drag / 1000).toFixed(1) + ' kN' : 'N/A';
             const grav = point.grav !== undefined ? (point.grav / 1000).toFixed(1) + ' kN' : 'N/A';
+            const pitch = point.pitch !== undefined ? point.pitch.toFixed(1) + '°' : 'N/A';
 
             tooltip.innerHTML = `
                 <div class="tooltip-title">📊 DATA POINT - ${phase}</div>
@@ -468,6 +469,10 @@
                 <div class="tooltip-row">
                     <span class="tooltip-label">V-Vertical:</span>
                     <span class="tooltip-value">${point.velV.toFixed(1)} m/s</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Pitch Angle:</span>
+                    <span class="tooltip-value">${pitch}</span>
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">Drag Force:</span>
@@ -633,10 +638,55 @@
             }
             ctx.stroke();
             
-            // Draw selected point (if any)
+            // Draw time interval points (every 10 seconds)
+            ctx.fillStyle = '#FF0000'; // Red color for time points
+            for (let i = 0; i < data.length; i++) {
+                const point = data[i];
+                // Check if this point is close to a 10-second interval
+                if (Math.abs(point.time % 10) < 0.5) { // Within 0.5s of a 10s interval
+                    const x = padding + ((point.velH - minH) / (maxH - minH)) * width;
+                    const y = padding + height - ((point.alt - minAlt) / (maxAlt - minAlt)) * height;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            // Draw selected point with pitch vector (if any)
             if (selectedPoint) {
                 const x = padding + ((selectedPoint.velH - minH) / (maxH - minH)) * width;
                 const y = padding + height - ((selectedPoint.alt - minAlt) / (maxAlt - minAlt)) * height;
+                
+                // Draw pitch direction vector
+                if (selectedPoint.pitch !== undefined) {
+                    const vectorLength = 40;
+                    const pitchRad = selectedPoint.pitch * Math.PI / 180;
+                    
+                    // Pitch is measured from vertical (0° = up, 90° = right)
+                    const endX = x + vectorLength * Math.sin(pitchRad);
+                    const endY = y - vectorLength * Math.cos(pitchRad);
+                    
+                    // Draw vector arrow
+                    ctx.strokeStyle = '#FF00FF';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(endX, endY);
+                    ctx.stroke();
+                    
+                    // Draw arrowhead
+                    const arrowSize = 8;
+                    const angle1 = pitchRad + Math.PI * 2.7;
+                    const angle2 = pitchRad + Math.PI * 3.3;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(endX, endY);
+                    ctx.lineTo(endX + arrowSize * Math.cos(angle1), endY + arrowSize * Math.sin(angle1));
+                    ctx.moveTo(endX, endY);
+                    ctx.lineTo(endX + arrowSize * Math.cos(angle2), endY + arrowSize * Math.sin(angle2));
+                    ctx.stroke();
+                }
                 
                 // Outer glow
                 ctx.beginPath();
@@ -833,9 +883,9 @@
             }
 
             log(`🚀 SFS REALISTIC SIM: EARTH -> ${selectedDestination.toUpperCase()}`);
-            log('─'.repeat(180));
-            log(`${'Time'.padEnd(10)}${'Alt(km)'.padEnd(10)}${'Fuel%'.padEnd(9)}${'Acc(g)'.padEnd(9)}${'Vel(m/s)'.padEnd(10)}${'V-Horiz'.padEnd(10)}${'V-Vert'.padEnd(10)}${'Drag(kN)'.padEnd(11)}${'Grav(kN)'.padEnd(11)}${'Temp(C)'.padEnd(10)}Phase`);
-            log('─'.repeat(180));
+            log('─'.repeat(200));
+            log(`${'Time'.padEnd(10)}${'Alt(km)'.padEnd(10)}${'Fuel%'.padEnd(9)}${'Acc(g)'.padEnd(9)}${'Vel(m/s)'.padEnd(10)}${'V-Horiz'.padEnd(10)}${'V-Vert'.padEnd(10)}${'Drag(kN)'.padEnd(11)}${'Grav(kN)'.padEnd(11)}${'Pitch'.padEnd(10)}${'Temp(C)'.padEnd(10)}Phase`);
+            log('─'.repeat(200));
 
             let time = 0.0, alt = 0.0, vel_v = 0.0, vel_h = 0.0, curr_idx = 0;
             let shield_temp = 20.0, chute_state = "STOWED";
@@ -938,7 +988,8 @@
                             drag: f_drag_mag,
                             grav: current_total_mass * g_accel,
                             temp: shield_temp,
-                            phase: mission_phase
+                            phase: mission_phase,
+                            pitch: pitch_deg
                         };
                         
                         if (mission_phase === "VERTICAL_ASCENT" || mission_phase === "ORBITAL_INSERTION") {
@@ -999,7 +1050,7 @@
 
                         log(`\n[${transfer_time.toFixed(1)}s] TRANSFER COMPLETE (Vh=${transfer_complete_vel_h.toFixed(1)} m/s)`, 'event');
                         log(`[${time.toFixed(1)}s] ENTERING ${selectedDestination.toUpperCase()} ATMOSPHERE`, 'event');
-                        log('─'.repeat(180));
+                        log('─'.repeat(200));
                         continue;
                     }
 
@@ -1039,7 +1090,7 @@
                         const grav_kn = (current_total_mass * g_accel) / 1000;
                         const temp_disp = mission_phase === "RE_ENTRY" ? shield_temp.toFixed(1) : "-";
 
-                        log(`${time.toFixed(1).padEnd(10)}${(alt/1000).toFixed(2).padEnd(10)}${fuel_p.toFixed(1).padEnd(9)}${total_acc_g.toFixed(2).padEnd(9)}${v_tot.toFixed(1).padEnd(10)}${vel_h.toFixed(1).padEnd(10)}${vel_v.toFixed(1).padEnd(10)}${drag_kn.toFixed(1).padEnd(11)}${grav_kn.toFixed(1).padEnd(11)}${temp_disp.padEnd(10)}${mission_phase}`);
+                        log(`${time.toFixed(1).padEnd(10)}${(alt/1000).toFixed(2).padEnd(10)}${fuel_p.toFixed(1).padEnd(9)}${total_acc_g.toFixed(2).padEnd(9)}${v_tot.toFixed(1).padEnd(10)}${vel_h.toFixed(1).padEnd(10)}${vel_v.toFixed(1).padEnd(10)}${drag_kn.toFixed(1).padEnd(11)}${grav_kn.toFixed(1).padEnd(11)}${pitch_deg.toFixed(1).padEnd(10)}${temp_disp.padEnd(10)}${mission_phase}`);
                     }
 
                     time += TIME_STEP;
